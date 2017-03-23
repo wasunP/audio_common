@@ -73,6 +73,7 @@ class soundtype:
     STOPPED = 0
     LOOPING = 1
     COUNTING = 2
+    PAUSED = 3
 
     def __init__(self, file, volume = 1.0):
         self.lock = threading.RLock()
@@ -134,14 +135,22 @@ class soundtype:
             finally:
                 self.lock.release()
 
+    def pause(self):
+        if self.state != self.PAUSED:
+            self.lock.acquire()
+            try:
+                self.sound.set_state(Gst.State.PAUSED)
+                self.state = self.PAUSED
+            finally:
+                self.lock.release()
+
     def single(self):
         self.lock.acquire()
         try:
             rospy.logdebug("Playing %s"%self.uri)
             self.staleness = 0
             if self.state == self.LOOPING:
-                self.stop()
-
+                self.pause()
             self.sound.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, 0)
             self.sound.set_state(Gst.State.PLAYING)
             self.state = self.COUNTING
@@ -149,8 +158,8 @@ class soundtype:
             self.lock.release()
 
     def command(self, cmd):
-         if cmd == SoundRequest.PLAY_STOP:
-             self.stop()
+         if cmd == SoundRequest.PLAY_STOP:  # misunderstood here should be paused in my opinion
+             self.stop()    # paused
          elif cmd == SoundRequest.PLAY_ONCE:
              self.single()
          elif cmd == SoundRequest.PLAY_START:
@@ -182,14 +191,14 @@ class soundplay:
     _feedback = SoundRequestFeedback()
     _result   = SoundRequestResult()
 
-    def stopdict(self,dict):
+    def pausedict(self,dict):
         for sound in dict.values():
-            sound.stop()
+            sound.pause()
 
-    def stopall(self):
-        self.stopdict(self.builtinsounds)
-        self.stopdict(self.filesounds)
-        self.stopdict(self.voicesounds)
+    def pauseall(self):
+        self.pausedict(self.builtinsounds)
+        self.pausedict(self.filesounds)
+        self.pausedict(self.voicesounds)
 
     def select_sound(self, data):
         if data.sound == SoundRequest.PLAY_FILE:
@@ -207,6 +216,7 @@ class soundplay:
                         rospy.logdebug('volume for cached wave has changed, resetting volume')
                         self.filesounds[data.arg].sound.set_property('volume', data.volume)
                 sound = self.filesounds[data.arg]
+
             else:
                 absfilename = os.path.join(roslib.packages.get_pkg_dir(data.arg2), data.arg)
                 if not absfilename in self.filesounds.keys():
@@ -274,10 +284,10 @@ class soundplay:
             return
         self.mutex.acquire()
         # Force only one sound at a time
-        self.stopall()
+        self.pauseall()
         try:
-            if data.sound == SoundRequest.ALL and data.command == SoundRequest.PLAY_STOP:
-                self.stopall()
+            if data.sound == SoundRequest.ALL and data.command == SoundRequest.PLAY_STOP:#should be paused
+                self.stopall()# should be paused
             else:
                 sound = self.select_sound(data)
                 sound.command(data.command)
