@@ -96,10 +96,9 @@ class soundtype:
         self.sound.set_property("volume",volume)
         self.staleness = 1
         self.file = file
-
-        self.bus = self.sound.get_bus()
-        self.bus.add_signal_watch()
-        self.bus.connect("message", self.on_stream_end)
+        #self.bus = self.sound.get_bus()
+        #self.bus.add_signal_watch()
+        #self.bus.connect("message", self.on_stream_end)
 
     def on_stream_end(self, bus, message):
         if message.type == Gst.MessageType.EOS:
@@ -110,7 +109,8 @@ class soundtype:
         self.stop()
 
     def update(self):
-        self.bus.poll(Gst.MessageType.ERROR, 10)
+        #self.bus.poll(Gst.MessageType.ERROR, 10)
+        pass
 
     def loop(self):
         self.lock.acquire()
