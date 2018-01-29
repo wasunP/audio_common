@@ -73,6 +73,7 @@ class soundtype:
     STOPPED = 0
     LOOPING = 1
     COUNTING = 2
+    PAUSED = 3
 
     def __init__(self, file, volume = 1.0):
         self.lock = threading.RLock()
@@ -134,14 +135,22 @@ class soundtype:
             finally:
                 self.lock.release()
 
+    def pause(self):
+        if self.state != self.PAUSED:
+            self.lock.acquire()
+            try:
+                self.sound.set_state(Gst.State.PAUSED)
+                self.state = self.PAUSED
+            finally:
+                self.lock.release()
+
     def single(self):
         self.lock.acquire()
         try:
             rospy.logdebug("Playing %s"%self.uri)
             self.staleness = 0
             if self.state == self.LOOPING:
-                self.stop()
-
+                self.pause()
             self.sound.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, 0)
             self.sound.set_state(Gst.State.PLAYING)
             self.state = self.COUNTING
@@ -149,8 +158,8 @@ class soundtype:
             self.lock.release()
 
     def command(self, cmd):
-         if cmd == SoundRequest.PLAY_STOP:
-             self.stop()
+         if cmd == SoundRequest.PLAY_STOP: #misunderstood here should be paused in my opinion
+             self.stop() #paused
          elif cmd == SoundRequest.PLAY_ONCE:
              self.single()
          elif cmd == SoundRequest.PLAY_START:
@@ -182,19 +191,19 @@ class soundplay:
     _feedback = SoundRequestFeedback()
     _result   = SoundRequestResult()
 
-    def stopdict(self,dict):
+    def pausedict(self,dict):
         for sound in dict.values():
-            sound.stop()
+            sound.pause()
 
-    def stopall(self):
-        self.stopdict(self.builtinsounds)
-        self.stopdict(self.filesounds)
-        self.stopdict(self.voicesounds)
+    def pauseall(self):
+        self.pausedict(self.builtinsounds)
+        self.pausedict(self.filesounds)
+        self.pausedict(self.voicesounds)
 
     def select_sound(self, data):
         if data.sound == SoundRequest.PLAY_FILE:
             if not data.arg2:
-                if not data.arg in self.filesounds.keys() or self.filesounds[data.arg].volume != data.volume:
+                if not data.arg in self.filesounds.keys():
                     rospy.logdebug('command for uncached wave: "%s"'%data.arg)
                     try:
                         self.filesounds[data.arg] = soundtype(data.arg, data.volume)
@@ -203,10 +212,14 @@ class soundplay:
                         return
                 else:
                     rospy.logdebug('command for cached wave: "%s"'%data.arg)
+                    if self.filesounds[data.arg].sound.get_property('volume') != data.volume:
+                        rospy.logdebug('volume for cached wave has changed, resetting volume')
+                        self.filesounds[data.arg].sound.set_property('volume', data.volume)
                 sound = self.filesounds[data.arg]
+
             else:
                 absfilename = os.path.join(roslib.packages.get_pkg_dir(data.arg2), data.arg)
-                if not absfilename in self.filesounds.keys() or self.filesounds[absfilename].volume != data.volume:
+                if not absfilename in self.filesounds.keys():
                     rospy.logdebug('command for uncached wave: "%s"'%absfilename)
                     try:
                         self.filesounds[absfilename] = soundtype(absfilename, data.volume)
@@ -215,10 +228,12 @@ class soundplay:
                         return
                 else:
                     rospy.logdebug('command for cached wave: "%s"'%absfilename)
+                    if self.filesounds[absfilename].sound.get_property('volume') != data.volume:
+                        rospy.logdebug('volume for cached wave has changed, resetting volume')
+                        self.filesounds[absfilename].sound.set_property('volume', data.volume)
                 sound = self.filesounds[absfilename]
         elif data.sound == SoundRequest.SAY:
-            print data
-            if not data.arg in self.voicesounds.keys() or self.voicesounds[data.arg].volume != data.volume:
+            if not data.arg in self.voicesounds.keys():
                 rospy.logdebug('command for uncached text: "%s"' % data.arg)
                 txtfile = tempfile.NamedTemporaryFile(prefix='sound_play', suffix='.txt')
                 (wavfile,wavfilename) = tempfile.mkstemp(prefix='sound_play', suffix='.wav')
@@ -240,6 +255,9 @@ class soundplay:
                     txtfile.close()
             else:
                 rospy.logdebug('command for cached text: "%s"'%data.arg)
+                if self.voicesounds[data.arg].sound.get_property('volume') != data.volume:
+                    rospy.logdebug('volume for cached text has changed, resetting volume')
+                    self.voicesounds[data.arg].sound.set_property('volume', data.volume)
             sound = self.voicesounds[data.arg]
         else:
             rospy.logdebug('command for builtin wave: %i'%data.sound)
@@ -265,10 +283,10 @@ class soundplay:
             return
         self.mutex.acquire()
         # Force only one sound at a time
-        self.stopall()
+        self.pauseall()
         try:
-            if data.sound == SoundRequest.ALL and data.command == SoundRequest.PLAY_STOP:
-                self.stopall()
+            if data.sound == SoundRequest.ALL and data.command == SoundRequest.PLAY_STOP:#should be paused
+                self.stopall()# should be paused
             else:
                 sound = self.select_sound(data)
                 sound.command(data.command)
